@@ -1,0 +1,861 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chroma Quest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            touch-action: manipulation;
+            overscroll-behavior: none;
+            user-select: none;
+            margin: 0;
+            overflow: hidden;
+        }
+        .tile {
+            transition: background-color 0.3s ease;
+        }
+        #splashScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(to bottom, #1a202c, #2d3748);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        #splashScreen img {
+            max-width: 80%;
+            max-height: 70%;
+            object-fit: contain;
+            margin-bottom: 1rem;
+        }
+        #introScreen, #menuScreen, #levelScreen, #dialogueScreen, #victoryScreen, #leaderboardScreen {
+            background: linear-gradient(to bottom, #1a202c, #2d3748);
+        }
+        #storyScreen {
+            background: #ffffff;
+        }
+        .animate-fade-in {
+            animation: fadeIn 1s ease-in;
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .svg-icon {
+            width: 64px;
+            height: 64px;
+        }
+        #storyContent {
+            max-height: 70vh;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #6b7280 #ffffff;
+            padding: 1.5rem;
+            padding-bottom: 2rem;
+            background: #ffffff;
+            border-radius: 0.5rem;
+        }
+        #storyContent::-webkit-scrollbar {
+            width: 8px;
+        }
+        #storyContent::-webkit-scrollbar-track {
+            background: #ffffff;
+        }
+        #storyContent::-webkit-scrollbar-thumb {
+            background: #6b7280;
+            border-radius: 4px;
+        }
+        #storyContent h1 {
+            @apply text-4xl font-bold text-black mb-12 tracking-tight;
+        }
+        #storyContent h2 {
+            @apply text-3xl font-semibold text-black mb-4 tracking-tight;
+        }
+        #storyContent p {
+            @apply text-lg text-black mb-12 leading-loose font-normal;
+        }
+        #storyContent em {
+            @apply text-gray-700;
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen p-4">
+    <div id="splashScreen">
+        <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgszU1Wb926aJzc211E8TrqUHBAUAEbGrAEOzuuyU2I77vUp2VgxOwCTOor26uCKeZ_JuMW6iHWik2CFUY6Db8L3_XCw_zey3y9265g-rpBD8XbrPLyT8S_UF0pHSi-ByvteVwDtudPYxSS5V1mSAHn8ELEjwLoD-SIS3HP8pgvceMJd0U/s1600/1000004917.jpg" alt="Chroma Quest Splash" onload="console.log('Splash image loaded')" onerror="console.log('Splash image failed to load')">
+        <button id="startSplashButton" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+            Start Game
+        </button>
+    </div>
+    <div id="introScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEj5QiogmgwxwbsWyOkBaXvQmPLbo4Damc7RKDsKhIEZOwLYjqac5NrUpEG5WCaLnBMLp-owfAG-3_gY2x8Eod2fZE_nhCV4IuCWwbesgFZ0PpYOz7r9I7rv1UMXq5P3bFsCDMbJH8zGgVMttUGYtL5ZVn7t1pxW_Fo-dhkqs9VyCNdUWUhVf2iyEZngvlRD/s1600/1000004939.jpg" alt="Chroma Quest Intro Image">
+            <h1 class="text-3xl font-bold text-white">Chroma Quest</h1>
+        </div>
+        <p class="text-gray-300 mb-4">
+            Welcome to Chromaria, a realm where colors weave life and magic. The Chroma Crystal, its heart, has shattered, scattering vibrant shards across the Chroma Fields. Without it, our villages dim, and the air grows still. You are <span class="font-bold">Lira</span>, gifted with the rare ability to see the shards’ true hues.
+        </p>
+        <p class="text-gray-300 mb-4">
+            I am <span class="font-bold">Elder Varyn</span>, your guide. The Fields are chaotic, Lira—tap only the shards that match the target hue to restore the Crystal’s power. A wrong tap could unravel everything, so stay sharp! I believe in you, but... well, no pressure, eh?
+        </p>
+        <p class="text-gray-400 italic mb-4">
+            Save Chromaria, Lira. The colors depend on you.
+        </p>
+        <button id="beginQuestButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+            Begin Your Quest
+        </button>
+    </div>
+    <div id="menuScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgKV5fYLIy5EPIVFGWB48GHBMuChhkmPhgQdTeyZQsm70lpK3oUDfZDW0l0-Yj05Do0ktZJ3-X64cQn3JHgnIXDvo0WGOqjYETyT2Nl6j8euM6C76SH8BylHW9MNUdKM91mTvP0HXVRfMY8qnvOR2Axw9gPjll8bcnTLaqDS2vog7XUAtQlBuHDCCTKX8U_/s1600/1000004941.jpg" alt="Lira Icon">
+            <h1 class="text-3xl font-bold text-white">Chroma Quest</h1>
+        </div>
+        <p class="text-gray-300 mb-4">Choose your path, Lira:</p>
+        <label for="difficulty" class="text-gray-300 mb-2 block">Difficulty:</label>
+        <select id="difficulty" class="w-full bg-gray-700 text-white p-2 rounded mb-4">
+            <option value="easy">Easy</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard</option>
+        </select>
+        <button id="questModeButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mb-2">
+            Quest Mode
+        </button>
+        <p class="text-gray-400 text-sm mb-4">Join Varyn to restore the Chroma Crystal across 5 epic chapters.</p>
+        <button id="highScoreModeButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mb-2">
+            High Score Mode
+        </button>
+        <p class="text-gray-400 text-sm mb-4">Test your skills in an endless challenge to earn the highest Crystal Energy!</p>
+        <p class="text-gray-400 text-sm mb-4">Power-Ups: After 20 points, tap yellow star tiles for Slow Grid (+200ms for 5s) or Extra Time (+5s).</p>
+        <button id="storyButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mb-2">
+            Read the Saga
+        </button>
+        <p class="text-gray-400 text-sm mb-4">Discover the legend of Chromaria and Lira’s destiny.</p>
+    </div>
+    <div id="storyScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEgKV5fYLIy5EPIVFGWB48GHBMuChhkmPhgQdTeyZQsm70lpK3oUDfZDW0l0-Yj05Do0ktZJ3-X64cQn3JHgnIXDvo0WGOqjYETyT2Nl6j8euM6C76SH8BylHW9MNUdKM91mTvP0HXVRfMY8qnvOR2Axw9gPjll8bcnTLaqDS2vog7XUAtQlBuHDCCTKX8U_/s1600/1000004941.jpg" alt="Lira Icon">
+            <h1 class="text-3xl font-bold text-black">The Saga of Chromaria</h1>
+        </div>
+        <div id="storyContent"></div>
+        <button id="backToMenuButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mt-4">
+            Back to Menu
+        </button>
+    </div>
+    <div id="levelScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEj5QiogmgwxwbsWyOkBaXvQmPLbo4Damc7RKDsKhIEZOwLYjqac5NrUpEG5WCaLnBMLp-owfAG-3_gY2x8Eod2fZE_nhCV4IuCWwbesgFZ0PpYOz7r9I7rv1UMXq5P3bFsCDMbJH8zGgVMttUGYtL5ZVn7t1pxW_Fo-dhkqs9VyCNdUWUhVf2iyEZngvlRD/s1600/1000004939.jpg" alt="Chroma Quest Chapter Image">
+            <h1 class="text-2xl font-bold text-white">Chapter <span id="chapterNumber"></span></h1>
+        </div>
+        <p class="text-gray-300 mb-4">Time: <span id="chapterTimer"></span> seconds</p>
+        <p class="text-gray-300 mb-4">Varyn: <span id="chapterQuote"></span></p>
+        <button id="startLevelButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+            Start Chapter
+        </button>
+    </div>
+    <div id="game" class="w-full max-w-md bg-gray-800 rounded-lg p-4 shadow-lg hidden">
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-white">Chroma Quest</h1>
+                <p class="text-gray-400" id="gameModeText"></p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button id="muteButton" class="text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 4v16a1 1 0 01-1.707.707L5.586 15z"/>
+                    </svg>
+                </button>
+                <div id="targetColor" class="w-12 h-12 rounded-full border-2 border-white"></div>
+            </div>
+        </div>
+        <div class="mb-4 text-white">
+            <p>Crystal Energy: <span id="score">0</span></p>
+            <p>Best Energy: <span id="highScore">0</span></p>
+            <p>Time Left: <span id="timer">30</span>s</p>
+            <p id="audioStatus" class="text-sm text-gray-400">Audio: Not started</p>
+        </div>
+        <div id="grid" class="grid grid-cols-4 gap-2 mb-4"></div>
+        <p id="flavorText" class="text-center text-gray-300 mb-4">Varyn: Focus, Lira! Match the shard’s hue!</p>
+        <div id="endGameButtons" class="space-y-2 hidden">
+            <button id="playAgainButton" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+                Play Again
+            </button>
+            <button id="returnToMenuButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                Return to Menu
+            </button>
+        </div>
+    </div>
+    <div id="dialogueScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEj5QiogmgwxwbsWyOkBaXvQmPLbo4Damc7RKDsKhIEZOwLYjqac5NrUpEG5WCaLnBMLp-owfAG-3_gY2x8Eod2fZE_nhCV4IuCWwbesgFZ0PpYOz7r9I7rv1UMXq5P3bFsCDMbJH8zGgVMttUGYtL5ZVn7t1pxW_Fo-dhkqs9VyCNdUWUhVf2iyEZngvlRD/s1600/1000004939.jpg" alt="Chroma Quest Dialogue Image">
+            <h1 class="text-2xl font-bold text-white">Varyn’s Guidance</h1>
+        </div>
+        <p class="text-gray-300 mb-4">Varyn: <span id="varynDialogue"></span></p>
+        <button id="continueButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+            Continue Quest
+        </button>
+    </div>
+    <div id="victoryScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <div class="flex items-center mb-4">
+            <img class="svg-icon mr-2" src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEj5QiogmgwxwbsWyOkBaXvQmPLbo4Damc7RKDsKhIEZOwLYjqac5NrUpEG5WCaLnBMLp-owfAG-3_gY2x8Eod2fZE_nhCV4IuCWwbesgFZ0PpYOz7r9I7rv1UMXq5P3bFsCDMbJH8zGgVMttUGYtL5ZVn7t1pxW_Fo-dhkqs9VyCNdUWUhVf2iyEZngvlRD/s1600/1000004939.jpg" alt="Chroma Quest Victory Image">
+            <h1 class="text-3xl font-bold text-white">Victory!</h1>
+        </div>
+        <p class="text-gray-300 mb-4">
+            Lira, you’ve woven a miracle! The Chroma Crystal pulses with radiant hues, its shards reunited by your unwavering resolve. Chromaria awakens—fields bloom with scarlet and sapphire, villages shimmer under golden skies, and the air hums with magic. You, once a shy apprentice, now stand as our realm’s savior, your pink hair a beacon of hope. Elder Varyn, eyes misty, clutches his staff and whispers of an ancient prophecy fulfilled: a shard-seer would mend the world. The people chant your name, their songs echoing across the Chroma Fields. Yet, Varyn warns, shadows linger in the Crystal’s depths, hinting at a greater threat. For now, bask in this triumph, Lira—Chromaria shines because of you, but new adventures may call soon.
+        </p>
+        <p class="text-gray-400 italic mb-4">
+            You are the heart of Chromaria’s light, Lira. Thank you.
+        </p>
+        <div class="space-y-2">
+            <button id="viewLeaderboardButton" class="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded">
+                View Leaderboard
+            </button>
+            <button id="replayButton" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+                Return to Menu
+            </button>
+        </div>
+    </div>
+    <div id="leaderboardScreen" class="w-full max-w-md rounded-lg p-6 shadow-lg animate-fade-in hidden">
+        <h1 class="text-2xl font-bold text-white mb-4">Leaderboard</h1>
+        <div id="leaderboardList" class="text-gray-300 mb-4"></div>
+        <div id="initialsInput" class="hidden">
+            <p class="text-gray-300 mb-2">New high score! Enter your initials (3 letters):</p>
+            <input id="initials" type="text" maxlength="3" class="w-full bg-gray-700 text-white p-2 rounded mb-2" placeholder="ABC">
+            <button id="submitInitials" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                Submit
+            </button>
+        </div>
+        <button id="leaderboardToMenuButton" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded mt-2">
+            Return to Menu
+        </button>
+    </div>
+
+    <audio id="bgMusic" loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mp3">
+        Your browser does not support the audio element.
+    </audio>
+    <audio id="storyMusic" loop>
+        <source src="https://incompetech.com/music/royalty-free/mp3-royaltyfree/Folk%20Round.mp3" type="audio/mp3">
+        Your browser does not support the audio element.
+    </audio>
+
+    <script>
+        const colors = ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500'];
+        const difficulties = {
+            easy: {
+                quest: { timerMod: 5, scoreThreshold: 40, speedMod: 200 },
+                highscore: { startTimer: 35, timeBonus: 7, minSpeed: 800 }
+            },
+            normal: {
+                quest: { timerMod: 0, scoreThreshold: 50, speedMod: 0 },
+                highscore: { startTimer: 30, timeBonus: 5, minSpeed: 600 }
+            },
+            hard: {
+                quest: { timerMod: -5, scoreThreshold: 60, speedMod: -100 },
+                highscore: { startTimer: 25, timeBonus: 3, minSpeed: 500 }
+            }
+        };
+        const levels = [
+            { baseTimer: 30, baseUpdateSpeed: 1000, quote: "The Red Field pulses with warmth. Start here, Lira, and gather its energy!" },
+            { baseTimer: 25, baseUpdateSpeed: 900, quote: "The Blue Field swirls faster. Stay calm, Lira, you’ve got this!" },
+            { baseTimer: 20, baseUpdateSpeed: 800, quote: "The Green Field is wild, Lira. Quick taps, or the shards slip away!" },
+            { baseTimer: 18, baseUpdateSpeed: 700, quote: "The Yellow Field hums with power. Precision, Lira, precision!" },
+            { baseTimer: 15, baseUpdateSpeed: 600, quote: "The Purple Field is the last trial, Lira. All of Chromaria watches you!" }
+        ];
+        const varynDialogues = [
+            "Well done, Lira! The Red Field’s energy flows stronger already. The Blue Field awaits—it’s trickier, so keep your eyes sharp. Did I ever tell you about the time I tripped over a shard? Ha, another story for later!",
+            "By the hues, Lira, you’re a natural! The Blue Field’s calmed, but the Green Field’s wilder. Tap faster, and don’t let the chaos fool you. I’m proud, but don’t let it go to your head, eh?",
+            "Incredible, Lira! The Green Field bends to your will. The Yellow Field’s next, and it’s a test of precision. The Crystal’s almost whole—can you feel it? Keep going, our hope’s with you!",
+            "Lira, you’re a legend in the making! The Yellow Field’s power surges through the Crystal. One last trial in the Purple Field. It’s fast, but I know you’ll shine. Save Chromaria, my apprentice!"
+        ];
+
+        let score = 0;
+        let highScore = localStorage.getItem('highScore') || 0;
+        let currentLevel = 0;
+        let timeLeft = 30;
+        let updateSpeed = 1000;
+        let gameMode = null;
+        let difficulty = localStorage.getItem('difficulty') || 'normal';
+        let isGameRunning = false;
+        let interval;
+        let gridInterval;
+        let scoreMilestone = 50;
+        let powerUpTile = null;
+        let powerUpActive = false;
+        let powerUpTimer = null;
+        let leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+        let isMuted = false;
+        let isStoryScreen = false;
+        let isVictoryScreen = false;
+
+        const splashScreen = document.getElementById('splashScreen');
+        const introScreen = document.getElementById('introScreen');
+        const menuScreen = document.getElementById('menuScreen');
+        const storyScreen = document.getElementById('storyScreen');
+        const levelScreen = document.getElementById('levelScreen');
+        const gameScreen = document.getElementById('game');
+        const dialogueScreen = document.getElementById('dialogueScreen');
+        const victoryScreen = document.getElementById('victoryScreen');
+        const leaderboardScreen = document.getElementById('leaderboardScreen');
+        const startSplashButton = document.getElementById('startSplashButton');
+        const beginQuestButton = document.getElementById('beginQuestButton');
+        const questModeButton = document.getElementById('questModeButton');
+        const highScoreModeButton = document.getElementById('highScoreModeButton');
+        const storyButton = document.getElementById('storyButton');
+        const backToMenuButton = document.getElementById('backToMenuButton');
+        const startLevelButton = document.getElementById('startLevelButton');
+        const continueButton = document.getElementById('continueButton');
+        const replayButton = document.getElementById('replayButton');
+        const viewLeaderboardButton = document.getElementById('viewLeaderboardButton');
+        const playAgainButton = document.getElementById('playAgainButton');
+        const returnToMenuButton = document.getElementById('returnToMenuButton');
+        const difficultySelect = document.getElementById('difficulty');
+        const chapterNumber = document.getElementById('chapterNumber');
+        const chapterTimer = document.getElementById('chapterTimer');
+        const chapterQuote = document.getElementById('chapterQuote');
+        const gameModeText = document.getElementById('gameModeText');
+        const grid = document.getElementById('grid');
+        const scoreDisplay = document.getElementById('score');
+        const highScoreDisplay = document.getElementById('highScore');
+        const timerDisplay = document.getElementById('timer');
+        const targetColorDisplay = document.getElementById('targetColor');
+        const endGameButtons = document.getElementById('endGameButtons');
+        const bgMusic = document.getElementById('bgMusic');
+        const storyMusic = document.getElementById('storyMusic');
+        const muteButton = document.getElementById('muteButton');
+        const audioStatus = document.getElementById('audioStatus');
+        const flavorText = document.getElementById('flavorText');
+        const varynDialogue = document.getElementById('varynDialogue');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const initialsInput = document.getElementById('initialsInput');
+        const initials = document.getElementById('initials');
+        const submitInitials = document.getElementById('submitInitials');
+        const leaderboardToMenuButton = document.getElementById('leaderboardToMenuButton');
+
+        highScoreDisplay.textContent = highScore;
+        difficultySelect.value = difficulty;
+
+        for (let i = 0; i < 16; i++) {
+            const tile = document.createElement('div');
+            tile.className = 'tile w-16 h-16 rounded-lg relative';
+            tile.dataset.index = i;
+            grid.appendChild(tile);
+        }
+
+        const tiles = document.querySelectorAll('.tile');
+
+        const storyMarkdown = `
+# The Saga of Chromaria: The Quest for the Chroma Crystal
+
+## The Heart of Chromaria
+
+In the realm of Chromaria, color is life. Rivers shimmer with sapphire waves, forests pulse with emerald light, and skies blaze with crimson sunsets. Every hue is a thread in the tapestry of existence, woven by the Chroma Crystal, a radiant gem that floats at the heart of the realm. Housed in the Spire of Lumina, a tower of prismatic stone, the Crystal hums with ancient magic, sustaining Chromaria’s vibrancy. Its light fuels the crops of goldwheat, powers the spells of hueweavers, and kindles the dreams of every child born under its glow. For millennia, the Crystal was Chromaria’s heartbeat, its colors an eternal promise of harmony.
+
+But harmony is fragile. A century ago, a shadow fell upon the Spire. The Umbral Veil, a cabal of sorcerers who coveted the Crystal’s power, sought to unravel its hues for their own dominion. In a cataclysmic ritual, they struck the Crystal, shattering it into countless shards that scattered across the Chroma Fields—five sacred regions where colors flow like rivers. The Spire dimmed, villages faded to gray, and the air grew heavy with silence. Chromaria teetered on the brink of collapse, its magic bleeding away. The Veil vanished into the shadows, their motives unclear, but their curse lingered: without the Crystal, Chromaria would fade forever.
+
+## The Shard-Seer’s Awakening
+
+In a quiet village nestled in the Red Field, a young woman named Lira grew up under the Crystal’s fading light. With pink hair that shimmered like dawnstone and eyes that saw hues others missed, Lira was different. She could discern the subtlest shades—vermilion from scarlet, azure from cobalt—a gift whispered to be the mark of a shard-seer, a rare soul attuned to the Crystal’s essence. Yet Lira was shy, more comfortable sketching wildflowers than chasing legends. She dreamed of adventure but doubted her courage, content to listen to elders’ tales by the hearth.
+
+One such elder was Varyn, a bearded sage with a staff carved from prismwood and a headband adorned with a green gem that winked like a star. Once a hueweaver of renown, Varyn had fought in the Crystal War, wielding spells that bent light into shields and blades. Now, he was Chromaria’s keeper of lore, his wit as sharp as his magic was faded. “The Crystal’s shards are out there, lass,” he’d tell Lira, his eyes twinkling. “And I’d wager my beard you’re the one to find ‘em. Just don’t trip over a shard like I did in ‘73!” Lira laughed, dismissing his words as jest, but Varyn saw the spark of destiny in her gaze.
+
+When a gray mist crept into Lira’s village, sapping the red from roses and the warmth from hearths, Varyn’s jests turned urgent. “The Crystal’s time runs short,” he said, handing Lira a pendant etched with a 4x4 grid—a sacred pattern said to mirror the Crystal’s inner structure. “You see the shards’ true hues, Lira. Only you can gather them, match their colors, and restore the Crystal. Chromaria’s fading, and I’m too old to run from shadows. Will you answer the call?” Lira’s heart raced, fear warring with resolve. She nodded, clutching the pendant. Her quiet life was over; the Chroma Quest had begun.
+
+## The Five Fields of Chromaria
+
+Lira’s journey would take her across the Chroma Fields, each a vibrant realm tied to a primal hue, each guarding shards of the Crystal. Varyn guided her, his staff casting light to ward off the gray mist, his tales weaving courage into her steps. The Fields were alive, their colors chaotic, demanding Lira’s gift to discern the shards’ true hues amidst swirling distractions. A wrong choice could destabilize the Fields, unraveling their magic, but Varyn’s faith—and his endless quips—kept Lira steady.
+
+### The Red Field: Embers of Beginnings
+The Red Field glowed like a hearth, its scarlet grasses swaying under ruby skies. Here, Lira first saw the shards—glimmering fragments pulsing with warmth. Tapping only those that matched the Crystal’s crimson core, she wove their energy into her pendant’s grid. The Field hummed, its colors brightening, but Lira learned precision was key: a mismatched shard sent tremors through the earth. “Focus, lass!” Varyn chuckled. “The Crystal’s picky about its wardrobe!”
+
+### The Blue Field: Tides of Serenity
+The Blue Field shimmered with sapphire rivers and cobalt mists, its shards dancing like waves. Faster and wilder, they tested Lira’s reflexes. She matched azure hues under Varyn’s watchful eye, her confidence growing. Star-shaped boons appeared, gifts from the Crystal: some slowed the Field’s chaos, others granted precious time. “Ha! The Crystal’s cheering you on!” Varyn said, dodging a stray shard. Lira smiled, her fear fading.
+
+### The Green Field: Wilds of Instinct
+The Green Field was a jungle of emerald vines and jade lightning, its shards pulsing with untamed energy. Lira’s taps grew swift, her gift shining as she matched verdant hues. The Field fought back, its colors shifting rapidly, but Lira’s resolve held. “You’re a storm, Lira!” Varyn roared, his staff sparking. The pendant glowed brighter, the Crystal’s heart stirring.
+
+### The Yellow Field: Sparks of Precision
+The Yellow Field blazed with golden dunes and amber winds, its shards radiant but elusive. Precision was paramount; a single error dimmed the Field’s light. Lira’s hands steadied, her eyes sharp, matching saffron hues with grace. Varyn’s tales—of hueweavers who shaped stars—fueled her focus. “The Crystal’s nearly whole,” he whispered. “Chromaria’s watching, lass.”
+
+### The Purple Field: Veil of Destiny
+The Purple Field was a twilight realm of amethyst spires and violet storms, the final trial. Shards swirled in a frenzy, and shadows of the Umbral Veil whispered from the mist. Lira’s gift blazed, matching indigo hues as the pendant’s grid pulsed with power. Varyn stood firm, his magic shielding her from unseen threats. With a final tap, the shards aligned, and the Crystal’s light erupted, banishing the mist.
+
+## A Realm Reborn, A Hero Risen
+
+In the Spire of Lumina, Lira placed the pendant into the Crystal’s core. Light exploded—scarlet, sapphire, emerald, gold, violet—reweaving Chromaria’s tapestry. Villages bloomed, skies sang, and magic surged through every heart. Lira, once a shy dreamer, stood as Chromaria’s savior, her pink hair a beacon of hope. Varyn, eyes misty, clasped her shoulder. “You’ve fulfilled the prophecy, shard-seer. But the Veil’s shadows linger in the Crystal’s depths. Rest now, but stay sharp, eh?”
+
+Chromaria chanted Lira’s name, its colors eternal once more. Yet, as she gazed at the Crystal, Lira sensed a deeper call—an adventure beyond the Fields, where new hues and perils awaited. For now, she basked in triumph, the heart of Chromaria’s light.
+
+---
+
+*Join Lira and Varyn in Chroma Quest. Match the shards, restore the Crystal, and weave your legend in the vibrant realm of Chromaria. The colors await your touch.*
+        `;
+
+        document.getElementById('storyContent').innerHTML = marked.parse(storyMarkdown);
+
+        function getRandomColor() {
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function setTargetColor() {
+            const colorClass = getRandomColor();
+            targetColorDisplay.className = `w-12 h-12 rounded-full border-2 border-white ${colorClass}`;
+            return colorClass;
+        }
+
+        function updateGrid() {
+            tiles.forEach(tile => {
+                if (tile === powerUpTile) return;
+                tile.className = `tile w-16 h-16 rounded-lg ${getRandomColor()}`;
+                tile.innerHTML = '';
+            });
+            if (!powerUpTile && gameMode === 'highscore' && score >= 20 && Math.random() < 0.1) {
+                powerUpTile = tiles[Math.floor(Math.random() * tiles.length)];
+                powerUpTile.className = 'tile w-16 h-16 rounded-lg bg-yellow-300';
+                powerUpTile.innerHTML = `<svg class="w-8 h-8 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" viewBox="0 0 24 24" fill="#FFD700"><path d="M12 .587l3.668 7.431 8.332 1.209-6.001 5.853 1.416 8.265L12 18.897l-7.415 3.898 1.416-8.265-6.001-5.853 8.332-1.209z"/></svg>`;
+            }
+        }
+
+        function applyPowerUp(type) {
+            powerUpActive = true;
+            powerUpTile = null;
+            if (type === 'slow') {
+                updateSpeed += 200;
+                clearInterval(gridInterval);
+                gridInterval = setInterval(updateGrid, updateSpeed);
+                flavorText.textContent = 'Varyn: Slow Grid activated!';
+                powerUpTimer = setTimeout(() => {
+                    updateSpeed = Math.max(difficulties[difficulty].highscore.minSpeed, updateSpeed - 200);
+                    clearInterval(gridInterval);
+                    gridInterval = setInterval(updateGrid, updateSpeed);
+                    powerUpActive = false;
+                    flavorText.textContent = `Varyn: Focus, Lira! Match the shard’s hue!`;
+                }, 5000);
+            } else {
+                timeLeft += 5;
+                timerDisplay.textContent = timeLeft;
+                flavorText.textContent = 'Varyn: Extra Time gained!';
+                setTimeout(() => {
+                    powerUpActive = false;
+                    flavorText.textContent = `Varyn: Focus, Lira! Match the shard’s hue!`;
+                }, 1000);
+            }
+        }
+
+        function updateLeaderboard(newScore) {
+            leaderboardScreen.classList.remove('hidden');
+            gameScreen.classList.add('hidden');
+            dialogueScreen.classList.add('hidden');
+            victoryScreen.classList.add('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+            leaderboard.sort((a, b) => b.score - a.score);
+            if (leaderboard.length < 5 || newScore > leaderboard[leaderboard.length - 1].score) {
+                initialsInput.classList.remove('hidden');
+                leaderboardList.textContent = 'Enter your initials to claim your spot!';
+                submitInitials.onclick = () => {
+                    const name = initials.value.toUpperCase().slice(0, 3) || 'AAA';
+                    leaderboard.push({ initials: name, score: newScore });
+                    leaderboard.sort((a, b) => b.score - a.score);
+                    leaderboard = leaderboard.slice(0, 5);
+                    localStorage.setItem('leaderboard', JSON.stringify(leaderboard));
+                    initialsInput.classList.add('hidden');
+                    displayLeaderboard();
+                };
+            } else {
+                initialsInput.classList.add('hidden');
+                displayLeaderboard();
+            }
+        }
+
+        function displayLeaderboard() {
+            leaderboardList.innerHTML = leaderboard.length ? leaderboard.map((entry, i) => `${i + 1}. ${entry.initials}: ${entry.score}`).join('<br>') : 'No scores yet!';
+        }
+
+        function manageAudio(action, audioElement, statusText) {
+            return new Promise((resolve, reject) => {
+                try {
+                    if (action === 'play' && !isMuted) {
+                        const playAudio = () => {
+                            audioElement.play()
+                                .then(() => {
+                                    audioStatus.textContent = statusText;
+                                    console.log(`${statusText} (ID: ${audioElement.id})`);
+                                    resolve();
+                                })
+                                .catch(e => {
+                                    audioStatus.textContent = `${statusText.split(':')[0]}: Failed (${e.name})`;
+                                    console.error(`${statusText.split(':')[0]} play failed:`, e);
+                                    reject(e);
+                                });
+                        };
+                        if (audioElement.readyState >= 2) {
+                            playAudio();
+                        } else {
+                            audioElement.addEventListener('canplay', playAudio, { once: true });
+                            setTimeout(() => {
+                                if (audioElement.readyState < 2) {
+                                    audioStatus.textContent = `${statusText.split(':')[0]}: Failed (Audio not loaded)`;
+                                    console.error(`${statusText.split(':')[0]}: Audio not loaded in time`);
+                                    reject(new Error('Audio not loaded'));
+                                }
+                            }, 5000);
+                        }
+                    } else if (action === 'pause') {
+                        audioElement.pause();
+                        audioElement.currentTime = 0;
+                        audioStatus.textContent = 'Audio: Stopped';
+                        console.log(`Audio paused: ${audioElement.id}`);
+                        resolve();
+                    }
+                } catch (e) {
+                    audioStatus.textContent = `${statusText.split(':')[0]}: Error (${e.name})`;
+                    console.error('Audio error:', e);
+                    reject(e);
+                }
+            });
+        }
+
+        bgMusic.load();
+        storyMusic.load();
+        storyMusic.addEventListener('error', (e) => {
+            audioStatus.textContent = 'Story Audio: Failed (Load error)';
+            console.error('Story music load error:', e);
+        });
+        bgMusic.addEventListener('error', (e) => {
+            audioStatus.textContent = 'Audio: Failed (Load error)';
+            console.error('Background music load error:', e);
+        });
+
+        function showLevelScreen() {
+            levelScreen.classList.remove('hidden');
+            gameScreen.classList.add('hidden');
+            dialogueScreen.classList.add('hidden');
+            victoryScreen.classList.add('hidden');
+            leaderboardScreen.classList.add('hidden');
+            storyScreen.classList.add('hidden');
+            isStoryScreen = false;
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+            const level = levels[currentLevel];
+            chapterNumber.textContent = currentLevel + 1;
+            chapterTimer.textContent = level.baseTimer + difficulties[difficulty].quest.timerMod;
+            chapterQuote.textContent = level.quote;
+        }
+
+        function startGame() {
+            if (isGameRunning) return;
+            isGameRunning = true;
+            isStoryScreen = false;
+            isVictoryScreen = false;
+            score = 0;
+            powerUpTile = null;
+            powerUpActive = false;
+            clearTimeout(powerUpTimer);
+            const diff = difficulties[difficulty];
+            timeLeft = gameMode === 'quest' ? levels[currentLevel].baseTimer + diff.quest.timerMod : diff.highscore.startTimer;
+            updateSpeed = gameMode === 'quest' ? levels[currentLevel].baseUpdateSpeed + diff.quest.speedMod : diff.highscore.minSpeed;
+            scoreMilestone = 50;
+            scoreDisplay.textContent = score;
+            timerDisplay.textContent = timeLeft;
+            gameModeText.textContent = gameMode === 'quest' ? `Quest Mode - Chapter ${currentLevel + 1}` : 'High Score Mode';
+            playAgainButton.textContent = gameMode === 'quest' ? `Retry Chapter` : 'Play Again';
+            endGameButtons.classList.add('hidden');
+            flavorText.textContent = `Varyn: Focus, Lira! Match the shard’s hue!`;
+            setTargetColor();
+            updateGrid();
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('play', bgMusic, 'Audio: Playing');
+            interval = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+            clearInterval(gridInterval);
+            gridInterval = setInterval(updateGrid, updateSpeed);
+        }
+
+        function endGame() {
+            isGameRunning = false;
+            clearInterval(interval);
+            clearInterval(gridInterval);
+            clearTimeout(powerUpTimer);
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+            powerUpTile = null;
+            powerUpActive = false;
+            if (gameMode === 'quest') {
+                const threshold = difficulties[difficulty].quest.scoreThreshold;
+                if (score >= threshold) {
+                    if (currentLevel < levels.length - 1) {
+                        dialogueScreen.classList.remove('hidden');
+                        gameScreen.classList.add('hidden');
+                        isVictoryScreen = false;
+                        manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+                        varynDialogue.textContent = varynDialogues[currentLevel];
+                        currentLevel++;
+                    } else {
+                        victoryScreen.classList.remove('hidden');
+                        gameScreen.classList.add('hidden');
+                        isVictoryScreen = true;
+                        isStoryScreen = false;
+                        manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+                        manageAudio('play', storyMusic, 'Story Audio: Playing');
+                    }
+                } else {
+                    flavorText.textContent = `Varyn: Not enough energy, Lira! Retry Chapter ${currentLevel + 1}!`;
+                    endGameButtons.classList.remove('hidden');
+                    isVictoryScreen = false;
+                    manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+                }
+            } else {
+                flavorText.textContent = `Varyn: Great effort, Lira! Your Crystal Energy: ${score}. Try again?`;
+                endGameButtons.classList.add('hidden');
+                isVictoryScreen = false;
+                manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+                updateLeaderboard(score);
+            }
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('highScore', highScore);
+                highScoreDisplay.textContent = highScore;
+            }
+        }
+
+        console.log('Script started');
+        if (!splashScreen || !introScreen || !startSplashButton) {
+            console.error('Error: splashScreen, introScreen, or startSplashButton not found', { splashScreen, introScreen, startSplashButton });
+            audioStatus.textContent = 'Error: Screen elements missing';
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('DOM loaded');
+                startSplashButton.addEventListener('click', () => {
+                    console.log('Start button clicked: Hiding splash, showing intro');
+                    splashScreen.classList.add('hidden');
+                    splashScreen.style.zIndex = '-1';
+                    introScreen.classList.remove('hidden');
+                    audioStatus.textContent = 'Story Audio: Starting';
+                    manageAudio('play', storyMusic, 'Story Audio: Playing');
+                });
+            });
+        }
+
+        beginQuestButton.addEventListener('click', () => {
+            introScreen.classList.add('hidden');
+            menuScreen.classList.remove('hidden');
+            isStoryScreen = false;
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+        });
+
+        questModeButton.addEventListener('click', () => {
+            gameMode = 'quest';
+            currentLevel = 0;
+            menuScreen.classList.add('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            showLevelScreen();
+        });
+
+        highScoreModeButton.addEventListener('click', () => {
+            gameMode = 'highscore';
+            menuScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            startGame();
+        });
+
+        storyButton.addEventListener('click', () => {
+            menuScreen.classList.add('hidden');
+            storyScreen.classList.remove('hidden');
+            isStoryScreen = true;
+            isVictoryScreen = false;
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+            manageAudio('play', storyMusic, 'Story Audio: Playing');
+        });
+
+        backToMenuButton.addEventListener('click', () => {
+            storyScreen.classList.add('hidden');
+            menuScreen.classList.remove('hidden');
+            isStoryScreen = false;
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+        });
+
+        startLevelButton.addEventListener('click', () => {
+            levelScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            startGame();
+        });
+
+        continueButton.addEventListener('click', () => {
+            dialogueScreen.classList.add('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            showLevelScreen();
+        });
+
+        replayButton.addEventListener('click', () => {
+            victoryScreen.classList.add('hidden');
+            menuScreen.classList.remove('hidden');
+            currentLevel = 0;
+            isVictoryScreen = false;
+            isStoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+        });
+
+        viewLeaderboardButton.addEventListener('click', () => {
+            victoryScreen.classList.add('hidden');
+            isVictoryScreen = false;
+            isStoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+            updateLeaderboard(score);
+        });
+
+        playAgainButton.addEventListener('click', () => {
+            endGameButtons.classList.add('hidden');
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            if (gameMode === 'quest') {
+                showLevelScreen();
+            } else {
+                startGame();
+            }
+        });
+
+        returnToMenuButton.addEventListener('click', () => {
+            endGameButtons.classList.add('hidden');
+            gameScreen.classList.add('hidden');
+            menuScreen.classList.remove('hidden');
+            currentLevel = 0;
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+        });
+
+        difficultySelect.addEventListener('change', () => {
+            difficulty = difficultySelect.value;
+            localStorage.setItem('difficulty', difficulty);
+        });
+
+        leaderboardToMenuButton.addEventListener('click', () => {
+            leaderboardScreen.classList.add('hidden');
+            menuScreen.classList.remove('hidden');
+            currentLevel = 0;
+            isVictoryScreen = false;
+            manageAudio('pause', storyMusic, 'Story Audio: Stopped');
+            manageAudio('pause', bgMusic, 'Audio: Stopped');
+        });
+
+        muteButton.addEventListener('click', () => {
+            isMuted = !isMuted;
+            if (isMuted) {
+                manageAudio('pause', bgMusic, 'Audio: Muted');
+                manageAudio('pause', storyMusic, 'Story Audio: Muted');
+                muteButton.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 4v16a1 1 0 01-1.707.707L5.586 15zM15 18l6-6m0 0l-6-6m6 6H9"/></svg>`;
+                audioStatus.textContent = isStoryScreen || isVictoryScreen || !introScreen.classList.contains('hidden') ? 'Story Audio: Muted' : 'Audio: Muted';
+            } else {
+                if (isStoryScreen || isVictoryScreen || !introScreen.classList.contains('hidden')) {
+                    manageAudio('play', storyMusic, 'Story Audio: Playing');
+                } else if (isGameRunning) {
+                    manageAudio('play', bgMusic, 'Audio: Playing');
+                } else {
+                    audioStatus.textContent = 'Audio: Ready';
+                }
+                muteButton.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 4v16a1 1 0 01-1.707.707L5.586 15z"/></svg>`;
+            }
+        });
+
+        tiles.forEach(tile => {
+            tile.addEventListener('click', () => {
+                if (!isGameRunning || powerUpActive) return;
+                const targetColor = targetColorDisplay.classList[targetColorDisplay.classList.length - 1];
+                const tileColor = tile.classList[tile.classList.length - 1];
+                if (tile === powerUpTile) {
+                    applyPowerUp(Math.random() < 0.5 ? 'slow' : 'time');
+                } else if (tileColor === targetColor) {
+                    score += 10;
+                    scoreDisplay.textContent = score;
+                    setTargetColor();
+                    updateGrid();
+                    flavorText.textContent = `Varyn: Nice one, Lira! Keep it up!`;
+                    if (gameMode === 'highscore' && score >= scoreMilestone) {
+                        timeLeft += difficulties[difficulty].highscore.timeBonus;
+                        timerDisplay.textContent = timeLeft;
+                        updateSpeed = Math.max(difficulties[difficulty].highscore.minSpeed, updateSpeed - 50);
+                        clearInterval(gridInterval);
+                        gridInterval = setInterval(updateGrid, updateSpeed);
+                        scoreMilestone += 50;
+                        flavorText.textContent = `Varyn: Crystal surge! ${difficulties[difficulty].highscore.timeBonus}s added!`;
+                    }
+                } else {
+                    timeLeft -= 2;
+                    timerDisplay.textContent = timeLeft;
+                    flavorText.textContent = `Varyn: Wrong hue, Lira! Try again!`;
+                    if (timeLeft <= 0) {
+                        endGame();
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
